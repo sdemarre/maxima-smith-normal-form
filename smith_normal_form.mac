@@ -1,0 +1,169 @@
+/*
+%  SMITH : Smith normal form of an integer matrix.
+%
+%  [U,S,V] = smith(A) returns integer matrices U, S, and V such that
+%  A = U*S*V',
+%  S is diagonal and nonnegative, S(i,i) divides S(i+1,i+1) for all i,
+%  det U =+-1, and det V =+-1.
+%
+%  translated to maxima by Serge De Marre <sdemarre@gmail.com> 2017,2018
+%  from original octave/matlab version
+%  John Gilbert, December 1993
+%  Copyright (c) 1993, 1994 by Xerox Corporation. All rights reserved.
+*/
+
+/* gcd with same output as octave/matlab gcd */
+mgcd(a,b):=block([g,c,d],
+  [c,d,g]:gcdex(a,b),
+  if a < 0 then [-g,-c,-d] else [g,c,d]);
+
+
+/*
+%  EHERMITE : Elementary Hermite tranformation.
+%
+%  For integers a and b, E = ehermite(a,b) returns
+%  an integer matrix with determinant 1 such that E * [a;b] = [g;0],
+%  where g is the gcd of a and b.
+%
+%  translated to maxima by Serge De Marre <sdemarre@gmail.com> 2017,2018
+%  from original octave/matlab version
+%  John Gilbert, December 1993
+%  Copyright (c) 1993, 1994 by Xerox Corporation. All rights reserved.
+*/
+
+e_hermite(a,b):=block([g,c,d],
+  [g,c,d] : mgcd(a,b),
+  if is(g#0) then
+    matrix([c,d],[-b/g, a/g])
+    else
+    matrix([1, 0], [0, 1]));
+
+/* returns a copy of A with row_idxth row set to new_row  */
+setrow(A,row_idx, new_row):=block([m,n,nA:copy(A)],
+  [m,n]:matrix_size(A),
+  block([i],
+    for i:1 thru n do (
+      nA[row_idx, i] : new_row[i]),
+    nA));
+
+/* returns a copy of A with col_idxth column set to new_col  */
+setcol(A,col_idx,new_col):=block([m,n,nA:copy(A)],
+  [m,n]:matrix_size(A),
+  block([i],
+    for i:1 thru m do (
+      nA[i,col_idx] : new_col[i]),
+    nA));
+
+apply_e_hermite_row(A,i,j,E):=block([ri,rj, nri, nrj],
+  ri:A[i],
+  rj:A[j],
+  nri:E[1,1]*ri+E[1,2]*rj,
+  nrj:E[2,1]*ri+E[2,2]*rj,
+  setrow(setrow(A,i,nri),j,nrj));
+
+apply_e_hermite_col(A,i,j,E):=block([ci, cj, nci, ncj],
+  ci:transpose(col(A,i))[1],
+  cj:transpose(col(A,j))[1],
+  nci:E[1,1]*ci+E[2,1]*cj,
+  ncj:E[1,2]*ci+E[2,2]*cj,
+  setcol(setcol(A,i,nci),j,ncj));
+
+/* 'diagonal' 1 above real diagonal of S */
+superdiagonal(S):=block([m,n,i,D:[]],
+  [m,n]:matrix_size(S),
+  makelist(S[i-1,i],i,2,min(m+1,n)));
+
+
+nonzero_index_rec(D,n):=block([], if D[1]#0 then n else nonzero_index_rec(rest(D),n+1));
+nonzero_index(D):=nonzero_index_rec(D,1);
+
+setSubMatrix(A,i,j,S):=block([C:copy(A)],
+  C[i,i]:S[1,1],
+  C[i,j]:S[1,2],
+  C[j,i]:S[2,1],
+  C[j,j]:S[2,2],
+  C);
+getSubMatrix(A,i,j):=block([],
+  matrix([A[i,i],A[i,j]],[A[j,i],A[j,j]]));
+
+/*
+% This looks much like an SVD algorithm
+% that first bidiagonalizes A by Givens rotations and then chases zeros,
+% except for the construction of the 2 by 2 elementary transformation.
+*/
+
+smith_normal_form(A):=block([m,n,S,U,V],
+  [m,n]: matrix_size(A),
+  S: copy(A),
+  U: ident(m),
+  V: ident(n),
+  /* Bidiagonalize S with elementary Hermite transforms. */
+  block([i,j],
+    for j:1 thru min(m,n) do (
+      /* Zero column j below the diagonal. */
+      for i:j+1 thru m do (
+        if is(S[i,j] # 0) then block([E:e_hermite(S[j,j],S[i,j])],
+          /* E is an elementary Hermite transformation that */
+          /*   zeroes S(i,j) by combining rows i and j.     */
+          /* Apply the transform to S and U. */
+          S:apply_e_hermite_row(S,j,i,E),
+          U:apply_e_hermite_col(U,j,i,invert(E)))),
+      /* Zero row j after the superdiagonal. */
+      for i:j+2 thru n do (
+        if is(S[j,i] # 0) then block([E:e_hermite(S[j,j+1],S[j,i])],
+          /* E is an elementary Hermite transformation that */
+          /*   zeroes S(j,i) by combining columns j+1 and i. */
+          /* Apply the transform to S and V. */
+          S:apply_e_hermite_col(S,j+1,i, transpose(E)),
+          V:apply_e_hermite_col(V,j+1, i, invert(E)))))),
+
+/* Now S is upper bidiagonal. */
+/* Chase the superdiagonal nonzeros away. */
+block([D:superdiagonal(S)],
+  while some(lambda([e],is(e#0)), D) do block([b:nonzero_index(D),q,E,i,j],
+    /* Start chasing a bulge at the first nonzero superdiagonal element. */
+
+    /* To guarantee reduction in S(b,b), first make S(b,b) positive */
+    /* and make S(b,b+1) nonnegative and less than S(b,b). */
+    if S[b,b] < 0 then (
+      S:rowop(S,b,b,2),  /* lazy way of changing sign of row */
+      U:columnop(U,b,b,2)), /* lazy way of changing sign of column */
+    q:?floor(S[b,b+1],S[b,b]),
+    E:matrix([1,0],[-q,1]),
+    S:apply_e_hermite_col(S,b,b+1, transpose(E)),
+    V:apply_e_hermite_col(V,b,b+1,invert(E)),
+    if S[b,b+1] # 0 then block([E:e_hermite(S[b,b],S[b,b+1])],
+      /* Zero the first nonzero superdiagonal element */
+      /* using columns b and b+1, to start the bulge at S(b+1,b). */
+      S:apply_e_hermite_col(S,b,b+1,transpose(E)),
+      V:apply_e_hermite_col(V,b,b+1,invert(E)),
+      for j:1 thru min(m,n) do (
+        if j+1 <= m then block([E:e_hermite(S[j,j],S[j+1,j])],
+          /* Zero S(j+1,j) using rows j and j+1. */
+          S:apply_e_hermite_row(S,j,j+1,E),
+          U:apply_e_hermite_col(U, j, j+1, invert(E))),
+        if j+2 <= n then block([E:e_hermite(S[j,j+1], S[j,j+2])],
+          /* Zero S(j,j+2) using columns j+1 and j+2. */
+          S:apply_e_hermite_col(S,j+1, j+2, transpose(E)),
+          V:apply_e_hermite_col(V,j+1, j+2, invert(E))))),
+    D:superdiagonal(S))),
+
+/* Now S is diagonal. Make it nonnegative. */
+block([j],
+  for j:1 thru min(m,n) do (
+    if S[j,j] < 0 then (
+      S:rowop(S,j,j,2),
+      U:columnop(U,j,j,2)))),
+
+/* Squeeze factors to the lower right to enforce the divisibility condition. */
+block([i,j],
+  for i:1 thru min(m,n) do (
+    for j:i+1 thru min(m,n) do block([a:S[i,i], b:S[j,j],g,c,d],
+      /* Replace S(i,i) and S(j,j) by their gcd and lcm respectively. */
+      [g,c,d]:mgcd(a,b),
+      block([E:matrix([1,d],[-b/g, a*c/g]),
+             F:matrix([c,1],[-b*d/g, a/g])],
+             S:setSubMatrix(S,i,j,E.getSubMatrix(S,i,j).transpose(F)),
+             U:apply_e_hermite_col(U, i, j, invert(E)),
+             V:apply_e_hermite_col(V, i, j, invert(F))))),
+  [U,S,V]));
