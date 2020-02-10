@@ -18,6 +18,7 @@ has_rational_solutions(sols):=block([],
   some(lambda([s],is(denom(rhs(s))#1)),sols));
 
 solve_linear_diophantine(eqs):=block([vars, aug, A, b, U, S, V, nvars, Um1, neqs, nsols, e, sols],
+  if not listp(eqs) then (eqs:[eqs]),
   vars:listofvars(eqs),
   aug:augcoefmatrix(eqs, vars),
   if not every(numberp, aug) then error("Should be linear equations in unknowns"),
