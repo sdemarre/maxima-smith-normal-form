@@ -17,6 +17,31 @@ remove_zero_equations(tosolve):=block([result:[]],
 has_rational_solutions(sols):=block([],
   some(lambda([s],is(denom(rhs(s))#1)),sols));
 
+variable_name(v):=block([o:make_string_output_stream()],
+  with_stdout(o,grind(v)),
+  block([s:get_output_stream_string(o)],
+    substring(s,1,slength(s)-1)));
+
+is_zi_name(varname):=block([],
+  if is(slength(varname)>2) and is(substring(varname, 1,3)="%z") then
+  block([toks:tokens(substring(varname, 3), 'digitcharp)],
+    is(length(toks)=1) and is(slength(toks[1])=slength(varname) - 2))
+  else
+  false);
+
+get_zi_value(varname):=block([],parse_string(tokens(varname, 'digitcharp)[1]));
+
+/* input: a list of variables, some of which are named %zi, with i a number
+   output: the highest i that was found, or 0 if none (or %z0) was found
+   */
+   get_max_zi_value(vars):=block([varnames:map('variable_name, vars), zavlues],
+     zvalues:[],
+     for varname in varnames do (
+       if is_zi_name(varname) then push(get_zi_value(varname), zvalues)),
+     if length(zvalues)>0 then apply(max,zvalues) else 0);
+
+
+
 solve_linear_diophantine(eqs):=block([vars, aug, A, b, U, S, V, nvars, Um1, neqs, nsols, e, sols],
   if not listp(eqs) then (eqs:[eqs]),
   vars:listofvars(eqs),
@@ -52,7 +77,8 @@ solve_linear_diophantine(eqs):=block([vars, aug, A, b, U, S, V, nvars, Um1, neqs
     sols:solve(args(transpose(e))[1],vars)[1],
     block([newvars, renames, final],
       newvars:listify(setdifference(setify(listofvars(sols)), setify(vars))),
-      renames:makelist(newvars[i]=concat('%z,i),i,1,length(newvars)),
+      renames:block([zstart:1+get_max_zi_value(vars)],
+        makelist(newvars[i-zstart+1]=concat('%z,i),i , zstart, zstart+length(newvars)-1)),
       final:subst(renames, sols),
       if not listp(final) then final:[final],
       if has_rational_solutions(final) then
